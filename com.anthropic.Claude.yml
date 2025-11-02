@@ -1,0 +1,89 @@
+app-id: com.anthropic.Claude
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+base: org.electronjs.Electron2.BaseApp
+base-version: '24.08'
+command: claude-desktop
+separate-locales: false
+
+finish-args:
+  # X11 + XShm access
+  - --share=ipc
+  - --socket=x11
+  # Wayland access
+  - --socket=wayland
+  # Audio access
+  - --socket=pulseaudio
+  # Network access
+  - --share=network
+  # GPU acceleration
+  - --device=dri
+  # Home directory access for configuration
+  - --filesystem=home
+  # Access to .config for storing settings
+  - --filesystem=xdg-config/claude:create
+  # Session bus for desktop integration
+  - --socket=session-bus
+  # System bus for some desktop features
+  - --system-talk-name=org.freedesktop.Notifications
+  # Allow desktop notifications
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.kde.StatusNotifierWatcher
+  # Allow file picker dialogs
+  - --talk-name=org.freedesktop.portal.FileChooser
+
+modules:
+  - name: nodejs
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/bin /app/lib
+      - cp -a * /app/lib/nodejs/
+      - ln -s /app/lib/nodejs/bin/node /app/bin/node
+      - ln -s /app/lib/nodejs/bin/npm /app/bin/npm
+      - ln -s /app/lib/nodejs/bin/npx /app/bin/npx
+    sources:
+      - type: archive
+        url: https://nodejs.org/dist/v20.11.0/node-v20.11.0-linux-x64.tar.xz
+        sha256: 5c2f2762e6c839b53f1fe15c6c1893c0540c8dfc73cbafe6b02886d52e96f37e
+        dest: /app/lib/nodejs
+
+  - name: claude-desktop
+    buildsystem: simple
+    build-commands:
+      # Create directory structure
+      - mkdir -p /app/lib/claude-desktop
+      - mkdir -p /app/bin
+      - mkdir -p /app/share/applications
+      - mkdir -p /app/share/icons/hicolor/256x256/apps
+      
+      # Copy application files
+      - cp -r app.asar /app/lib/claude-desktop/
+      - cp -r resources /app/lib/claude-desktop/ || true
+      
+      # Install icons
+      - install -Dm644 claude_6_256x256x32.png /app/share/icons/hicolor/256x256/apps/com.anthropic.Claude.png
+      
+      # Create launcher script
+      - |
+        cat > /app/bin/claude-desktop << 'EOF'
+        #!/bin/bash
+        exec electron /app/lib/claude-desktop/app.asar "$@"
+        EOF
+      - chmod +x /app/bin/claude-desktop
+      
+      # Install desktop file
+      - install -Dm644 com.anthropic.Claude.desktop /app/share/applications/com.anthropic.Claude.desktop
+      
+      # Install metainfo
+      - install -Dm644 com.anthropic.Claude.metainfo.xml /app/share/metainfo/com.anthropic.Claude.metainfo.xml
+    
+    sources:
+      - type: dir
+        path: ../claude-desktop/build/electron-app
+      - type: file
+        path: ../claude-desktop/build/claude_6_256x256x32.png
+      - type: file
+        path: com.anthropic.Claude.desktop
+      - type: file
+        path: com.anthropic.Claude.metainfo.xml

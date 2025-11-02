@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.anthropic.Claude</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <name>Claude</name>
+  <summary>AI assistant from Anthropic</summary>
+  <description>
+    <p>
+      Claude is an AI assistant created by Anthropic. This desktop application
+      provides a native interface to interact with Claude, offering features like:
+    </p>
+    <ul>
+      <li>Natural language conversations</li>
+      <li>Code generation and analysis</li>
+      <li>Document processing and analysis</li>
+      <li>File system integration via MCP servers</li>
+      <li>Desktop Commander for system interaction</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">com.anthropic.Claude.desktop</launchable>
+  <url type="homepage">https://claude.ai</url>
+  <url type="help">https://support.claude.com</url>
+  <developer_name>Anthropic</developer_name>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.14.10" date="2024-11-01">
+      <description>
+        <p>Latest release of Claude Desktop</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Claude
+Comment=AI assistant from Anthropic
+Exec=claude-desktop %u
+Icon=com.anthropic.Claude
+Type=Application
+Terminal=false
+Categories=Office;Utility;Network;
+MimeType=x-scheme-handler/claude;
+StartupWMClass=Claude
+StartupNotify=true
+Keywords=AI;Assistant;Chat;Anthropic;

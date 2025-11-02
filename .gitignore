@@ -1,0 +1,48 @@
+# Build artifacts
+simple-build/
+repo/
+build-dir/
+*.flatpak
+
+# Downloaded files
+electron-*.zip
+electron-*.tar.xz
+*.deb
+
+# Flatpak builder cache
+.flatpak-builder/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+.cache/
+
+# Archives
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+
+# Node modules (if any)
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# System files
+Thumbs.db
+desktop.ini
