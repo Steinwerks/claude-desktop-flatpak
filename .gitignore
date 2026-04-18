@@ -2,6 +2,7 @@
 simple-build/
 repo/
 build-dir/
+_deb_extract/
 *.flatpak
 
 # Downloaded files

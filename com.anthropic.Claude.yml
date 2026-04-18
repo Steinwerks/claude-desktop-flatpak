@@ -34,20 +34,6 @@ finish-args:
   - --talk-name=org.freedesktop.portal.FileChooser
 
 modules:
-  - name: nodejs
-    buildsystem: simple
-    build-commands:
-      - mkdir -p /app/bin /app/lib
-      - cp -a * /app/lib/nodejs/
-      - ln -s /app/lib/nodejs/bin/node /app/bin/node
-      - ln -s /app/lib/nodejs/bin/npm /app/bin/npm
-      - ln -s /app/lib/nodejs/bin/npx /app/bin/npx
-    sources:
-      - type: archive
-        url: https://nodejs.org/dist/v20.11.0/node-v20.11.0-linux-x64.tar.xz
-        sha256: 5c2f2762e6c839b53f1fe15c6c1893c0540c8dfc73cbafe6b02886d52e96f37e
-        dest: /app/lib/nodejs
-
   - name: claude-desktop
     buildsystem: simple
     build-commands:
@@ -59,6 +45,7 @@ modules:
       
       # Copy application files
       - cp -r app.asar /app/lib/claude-desktop/
+      - cp -r app.asar.unpacked /app/lib/claude-desktop/ || true
       - cp -r resources /app/lib/claude-desktop/ || true
       
       # Install icons
@@ -67,8 +54,9 @@ modules:
       # Create launcher script
       - |
         cat > /app/bin/claude-desktop << 'EOF'
-        #!/bin/bash
-        exec electron /app/lib/claude-desktop/app.asar "$@"
+        #!/bin/sh
+        export TMPDIR="$XDG_RUNTIME_DIR/app/$FLATPAK_ID"
+        exec zypak-wrapper /app/electron/electron /app/lib/claude-desktop/app.asar --ozone-platform-hint=auto "$@"
         EOF
       - chmod +x /app/bin/claude-desktop
       
