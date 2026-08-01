@@ -1,6 +1,6 @@
 #!/bin/bash
 # Flatpak build for Claude Desktop using flatpak-builder
-# Requires: flatpak, flatpak-builder, 7z (p7zip), node + npx
+# Requires: flatpak, flatpak-builder, 7z (7zip), node + npx
 # Usage: ./build.sh [--no-bundle] [--keep-staging]
 
 set -e
@@ -93,20 +93,20 @@ info "flatpak-builder: $(flatpak-builder --version)"
 
 if ! command -v 7z &>/dev/null; then
     error "7z is not installed (needed to extract the Windows installer)."
-    echo "  Bazzite/Fedora (immutable): rpm-ostree install p7zip p7zip-plugins  (then reboot)"
-    echo "  Fedora (mutable):           sudo dnf install p7zip p7zip-plugins"
-    echo "  Ubuntu/Debian:              sudo apt install p7zip-full"
-    echo "  Arch:                       sudo pacman -S p7zip"
+    echo "  Bazzite:        already in the base image — nothing to install."
+    echo "  Fedora:         sudo dnf install 7zip  (p7zip was retired)"
+    echo "  Ubuntu/Debian:  sudo apt install p7zip-full"
+    echo "  Arch:           sudo pacman -S p7zip"
     exit 1
 fi
 info "7z: found"
 
 if ! command -v node &>/dev/null || ! command -v npx &>/dev/null; then
     error "node / npx is not installed (needed for asar patching)."
-    echo "  Bazzite/Fedora (immutable): toolbox enter && sudo dnf install nodejs npm"
-    echo "  Fedora (mutable):           sudo dnf install nodejs npm"
-    echo "  Ubuntu/Debian:              sudo apt install nodejs npm"
-    echo "  Arch:                       sudo pacman -S nodejs npm"
+    echo "  Bazzite (immutable — see BAZZITE.md for a no-reboot user-local install)"
+    echo "  Fedora (mutable):  sudo dnf install nodejs npm"
+    echo "  Ubuntu/Debian:     sudo apt install nodejs npm"
+    echo "  Arch:              sudo pacman -S nodejs npm"
     exit 1
 fi
 info "node: $(node --version)"

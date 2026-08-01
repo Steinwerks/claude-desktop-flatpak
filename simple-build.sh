@@ -1,7 +1,7 @@
 #!/bin/bash
 # Simple Flatpak build for Claude Desktop with bundled Electron
 # Does not require flatpak-builder — uses basic flatpak commands instead.
-# Requires: flatpak, 7z (p7zip), node + npx, wget or curl, unzip
+# Requires: flatpak, 7z (7zip), node + npx, wget or curl, unzip
 
 set -e
 
@@ -42,18 +42,21 @@ fi
 
 if ! command -v 7z &>/dev/null; then
     echo "❌ Error: 7z is not installed (needed to extract the Windows installer)."
-    echo "  Bazzite/Fedora (immutable): rpm-ostree install p7zip p7zip-plugins  (then reboot)"
-    echo "  Fedora (mutable):           sudo dnf install p7zip p7zip-plugins"
-    echo "  Ubuntu/Debian:              sudo apt install p7zip-full"
-    echo "  Arch:                       sudo pacman -S p7zip"
+    echo "  Bazzite:        already in the base image — nothing to install."
+    echo "  Fedora:         sudo dnf install 7zip  (p7zip was retired)"
+    echo "  Ubuntu/Debian:  sudo apt install p7zip-full"
+    echo "  Arch:           sudo pacman -S p7zip"
     exit 1
 fi
 
 if ! command -v node &>/dev/null || ! command -v npx &>/dev/null; then
     echo "❌ Error: node / npx is not installed (needed for asar patching)."
-    echo "  Bazzite/Fedora (immutable): toolbox enter && sudo dnf install nodejs npm"
-    echo "  Fedora (mutable):           sudo dnf install nodejs npm"
-    echo "  Ubuntu/Debian:              sudo apt install nodejs npm"
+    echo "  Bazzite (immutable — no layering or reboot needed):"
+    echo "    curl -LO https://nodejs.org/dist/v24.18.1/node-v24.18.1-linux-x64.tar.xz"
+    echo "    mkdir -p ~/.local/opt && tar xf node-v24.18.1-linux-x64.tar.xz -C ~/.local/opt"
+    echo "    export PATH=\"\$HOME/.local/opt/node-v24.18.1-linux-x64/bin:\$PATH\""
+    echo "  Fedora (mutable):  sudo dnf install nodejs npm"
+    echo "  Ubuntu/Debian:     sudo apt install nodejs npm"
     exit 1
 fi
 
@@ -72,19 +75,38 @@ fi
 # ── Runtimes ──────────────────────────────────────────────────────────────────
 echo ""
 echo "📦 Checking runtimes..."
-if ! flatpak list --runtime | grep -qF "org.freedesktop.Platform"; then
-    echo "  Installing Platform runtime ${RUNTIME_VERSION}..."
-    flatpak install -y --noninteractive flathub org.freedesktop.Platform//${RUNTIME_VERSION}
+
+# Prefer a user-scope install (no polkit prompt), but only if the user
+# installation actually has a flathub remote to pull from.
+if flatpak remotes --user --columns=name 2>/dev/null | grep -qx "flathub"; then
+    SCOPE="--user"
+elif flatpak remotes --system --columns=name 2>/dev/null | grep -qx "flathub"; then
+    SCOPE="--system"
+    echo "  ℹ No user-scope flathub remote; using the system one (expect a polkit prompt)."
+    echo "    To avoid that: flatpak remote-add --if-not-exists --user flathub \\"
+    echo "                     https://flathub.org/repo/flathub.flatpakrepo"
 else
-    echo "  ✓ org.freedesktop.Platform already installed."
+    echo "❌ Error: no 'flathub' remote is configured."
+    echo "  flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo"
+    exit 1
 fi
 
-if ! flatpak list --runtime | grep -qF "org.electronjs.Electron2.BaseApp"; then
-    echo "  Installing Electron BaseApp ${RUNTIME_VERSION}..."
-    flatpak install -y --noninteractive flathub org.electronjs.Electron2.BaseApp//${RUNTIME_VERSION}
-else
-    echo "  ✓ org.electronjs.Electron2.BaseApp already installed."
-fi
+# Checks the exact branch, in any installation — `flatpak list | grep <name>`
+# would match a different runtime version and silently skip the install.
+ensure_ref() {
+    local ref="$1"
+    if flatpak info "$ref" &>/dev/null; then
+        echo "  ✓ ${ref} already installed."
+    else
+        echo "  Installing ${ref}..."
+        flatpak install -y --noninteractive $SCOPE flathub "$ref"
+    fi
+}
+
+# build-init needs the Sdk present too, not just the Platform.
+ensure_ref "org.freedesktop.Platform//${RUNTIME_VERSION}"
+ensure_ref "org.freedesktop.Sdk//${RUNTIME_VERSION}"
+ensure_ref "org.electronjs.Electron2.BaseApp//${RUNTIME_VERSION}"
 
 # ── Download Electron ─────────────────────────────────────────────────────────
 ELECTRON_FILE="electron-v${ELECTRON_VERSION}-linux-x64.zip"

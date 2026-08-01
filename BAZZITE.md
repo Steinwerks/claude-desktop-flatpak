@@ -1,39 +1,56 @@
 # Running Claude Desktop on Bazzite
 
-`simple-build.sh` is the recommended path on Bazzite — it avoids the `flatpak-builder` + reboot requirement.
+`simple-build.sh` is the recommended path on Bazzite — it avoids `flatpak-builder`, and the whole
+build runs on the host with **no rpm-ostree layering and no reboot**.
+
+Don't run the build inside a toolbox. A toolbox container has its own `/usr`, so it can't see
+host-layered packages, and it ships no `flatpak` binary — the script's prerequisite checks fail
+immediately there.
 
 ## Step 1 — Install prerequisites
 
-Bazzite is immutable, so `7z` needs to be layered via rpm-ostree. `node` is best run from a toolbox to avoid a reboot.
+**7z** — already in the Bazzite base image, nothing to install. Confirm with:
 
 ```bash
-# Layer 7z (requires reboot)
-rpm-ostree install p7zip p7zip-plugins
-systemctl reboot
+command -v 7z    # → /usr/bin/7z
 ```
 
+> If it's ever missing, the package is `7zip` (`sudo dnf install 7zip`), not `p7zip` — p7zip was
+> retired from Fedora.
+
+**node / npx** — not in Bazzite, and layering it would cost a reboot. Use a user-local tarball
+instead; the build only needs it for two `npx @electron/asar` calls.
+
 ```bash
-# After reboot — get node inside a toolbox
-toolbox create && toolbox enter
-sudo dnf install nodejs npm
-exit
+mkdir -p ~/.local/opt
+curl -L https://nodejs.org/dist/v24.18.1/node-v24.18.1-linux-x64.tar.xz \
+  | tar xJ -C ~/.local/opt
+export PATH="$HOME/.local/opt/node-v24.18.1-linux-x64/bin:$PATH"
+```
+
+That `export` only lasts for the current shell — either build in the same shell, or add the line to
+your `~/.bashrc` to keep it.
+
+**Flatpak runtimes** — `simple-build.sh` installs whatever is missing
+(`org.freedesktop.Platform`, `org.freedesktop.Sdk`, and `org.electronjs.Electron2.BaseApp`, all at
+`24.08`). Bazzite's flathub remote is system-scope only, so those installs trigger a polkit prompt.
+To install them user-scope with no prompt, add a user remote first:
+
+```bash
+flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
 ```
 
 ## Step 2 — Build
 
-Open a terminal **inside the toolbox** (so `node`/`npx` are available):
-
 ```bash
-toolbox enter
 cd ~/Documents/Source/claude-desktop-flatpak
 ./simple-build.sh
 ```
 
-This will download the Windows installer (~100MB), patch `app.asar`, build the Flatpak, and produce `claude-desktop.flatpak`.
+This downloads the Windows installer (~100MB) and Electron, patches `app.asar`, and produces
+`claude-desktop.flatpak`.
 
 ## Step 3 — Install
-
-Back on the **host** (outside toolbox):
 
 ```bash
 flatpak install --user claude-desktop.flatpak
@@ -45,8 +62,19 @@ flatpak install --user claude-desktop.flatpak
 flatpak run com.anthropic.Claude
 ```
 
-Or launch it from your app menu — it will appear as **Claude** under Office/Utility.
+Or launch it from your app menu — it appears as **Claude** under Office/Utility.
 
 ---
 
-> **Note:** If you hit Flatpak permission issues inside the toolbox, run the `flatpak install` step on the host side only. Toolbox mounts the host's Flatpak socket, so most commands work, but installation occasionally needs to happen outside the container.
+## Troubleshooting
+
+**`SHA-256 mismatch` or a 404 on the installer download.** The Claude Desktop version is pinned in
+`simple-build.sh` (`CLAUDE_VERSION`, `EXE_HASH`, `EXE_SHA256`). Anthropic eventually rotates
+releases, so an old pin will stop resolving; update all three constants together.
+
+**`npx` wants to download `@electron/asar` on every run.** Expected — it's fetched on demand and
+cached under `~/.npm`. The build needs network access anyway for the installer and Electron.
+
+**Nothing gets layered by this guide.** If `rpm-ostree status` shows requested packages you added
+for an earlier version of these instructions (e.g. `p7zip`), you can drop them:
+`rpm-ostree uninstall p7zip p7zip-plugins`.
