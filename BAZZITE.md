@@ -1,7 +1,14 @@
 # Running Claude Desktop on Bazzite
 
-`simple-build.sh` is the recommended path on Bazzite — it avoids `flatpak-builder`, and the whole
-build runs on the host with **no rpm-ostree layering and no reboot**.
+Both build scripts work on Bazzite, and neither needs rpm-ostree layering or a reboot — the whole
+build runs on the host.
+
+- **`./simple-build.sh`** — fewest moving parts; uses plain `flatpak build-*` commands.
+- **`./build.sh`** — uses flatpak-builder. Install it from Flathub (no root, no reboot) with
+  `flatpak install -y flathub org.flatpak.Builder`; the script falls back to
+  `flatpak run org.flatpak.Builder` when there's no native binary.
+
+Steps below use `simple-build.sh`; substitute `./build.sh` at Step 2 if you prefer that path.
 
 Don't run the build inside a toolbox. A toolbox container has its own `/usr`, so it can't see
 host-layered packages, and it ships no `flatpak` binary — the script's prerequisite checks fail

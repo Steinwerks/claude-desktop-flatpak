@@ -230,6 +230,14 @@ mkdir -p "$BUILD_DIR/files/share/metainfo"
 echo "  → Extracting Electron..."
 unzip -q "$ELECTRON_FILE" -d "$BUILD_DIR/files/lib/claude-desktop/"
 
+# Electron derives app.isPackaged from basename(process.execPath): a binary
+# still named "electron" reports isPackaged=false, and Claude then looks for its
+# locale files inside app.asar instead of in resources/ and dies with ENOENT.
+# Renaming the binary is what electron-builder does for real packaged apps.
+echo "  → Renaming electron binary (makes app.isPackaged true)..."
+mv "$BUILD_DIR/files/lib/claude-desktop/electron" \
+   "$BUILD_DIR/files/lib/claude-desktop/claude-desktop"
+
 echo "  → Copying patched app.asar..."
 cp "$PATCHED_ASAR" "$BUILD_DIR/files/lib/claude-desktop/resources/app.asar"
 
@@ -239,14 +247,30 @@ if [ -d "$UNPACKED_DIR" ]; then
     cp -r "$UNPACKED_DIR" "$BUILD_DIR/files/lib/claude-desktop/resources/app.asar.unpacked"
 fi
 
+# The app reads its locale files from process.resourcesPath at runtime
+# (resources/en-US.json and friends), so app.asar alone is not enough — the rest
+# of the Windows resources/ tree has to come along. Windows .exe helpers don't.
+echo "  → Copying bundled resources (locales, fonts, migrations)..."
+NUPKG_RESOURCES="$(dirname "$APP_ASAR")"
+find "$NUPKG_RESOURCES" -mindepth 1 -maxdepth 1 \
+    ! -name 'app.asar' ! -name 'app.asar.unpacked' ! -name '*.exe' \
+    -exec cp -r {} "$BUILD_DIR/files/lib/claude-desktop/resources/" \;
+
+if [ ! -f "$BUILD_DIR/files/lib/claude-desktop/resources/en-US.json" ]; then
+    echo "❌ resources/en-US.json is missing — the app would fail to launch."
+    exit 1
+fi
+
 echo "  → Copying icon..."
 cp "$ICON_SRC" "$BUILD_DIR/files/share/icons/hicolor/256x256/apps/${APP_ID}.png"
 
 echo "  → Creating launcher..."
+# No app.asar argument needed: it already sits at the default resources/app.asar
+# location next to the binary, so Electron finds it on its own.
 cat > "$BUILD_DIR/files/bin/claude-desktop" << 'EOF'
 #!/bin/sh
 export TMPDIR="$XDG_RUNTIME_DIR/app/$FLATPAK_ID"
-exec zypak-wrapper /app/lib/claude-desktop/electron /app/lib/claude-desktop/resources/app.asar --ozone-platform-hint=auto "$@"
+exec zypak-wrapper /app/lib/claude-desktop/claude-desktop --ozone-platform-hint=auto "$@"
 EOF
 chmod +x "$BUILD_DIR/files/bin/claude-desktop"
 

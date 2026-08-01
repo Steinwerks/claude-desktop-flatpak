@@ -18,6 +18,7 @@ section() { echo ""; echo "$*"; }
 # ── Constants ─────────────────────────────────────────────────────────────────
 APP_ID="com.anthropic.Claude"
 RUNTIME_VERSION="24.08"
+ELECTRON_VERSION="32.2.0"
 
 # Update these when Anthropic releases a new version.
 # Find the current installer URL at: https://downloads.claude.ai/releases/win32/x64/latest/
@@ -79,17 +80,24 @@ if ! command -v flatpak &>/dev/null; then
 fi
 info "flatpak: $(flatpak --version)"
 
-if ! command -v flatpak-builder &>/dev/null; then
+# flatpak-builder may be a native binary or the org.flatpak.Builder flatpak
+# (the usual choice on immutable systems like Bazzite, where layering costs a reboot).
+if command -v flatpak-builder &>/dev/null; then
+    FB=(flatpak-builder)
+elif flatpak info org.flatpak.Builder &>/dev/null; then
+    FB=(flatpak run org.flatpak.Builder)
+else
     error "flatpak-builder is not installed."
-    echo "  Bazzite/Fedora (immutable): rpm-ostree install flatpak-builder  (then reboot)"
-    echo "  Fedora (mutable):           sudo dnf install flatpak-builder"
-    echo "  Ubuntu/Debian:              sudo apt install flatpak-builder"
-    echo "  Arch:                       sudo pacman -S flatpak-builder"
+    echo "  Any distro (no root, no reboot):"
+    echo "    flatpak install -y flathub org.flatpak.Builder"
+    echo "  Fedora (mutable):  sudo dnf install flatpak-builder"
+    echo "  Ubuntu/Debian:     sudo apt install flatpak-builder"
+    echo "  Arch:              sudo pacman -S flatpak-builder"
     echo ""
     echo "  Alternatively, use ./simple-build.sh which does not require flatpak-builder."
     exit 1
 fi
-info "flatpak-builder: $(flatpak-builder --version)"
+info "flatpak-builder: $("${FB[@]}" --version 2>&1 | head -1)"
 
 if ! command -v 7z &>/dev/null; then
     error "7z is not installed (needed to extract the Windows installer)."
@@ -121,8 +129,9 @@ section "📦 Checking Flatpak runtimes..."
 
 install_runtime_if_missing() {
     local ref="$1"
-    local name="${ref%%//*}"
-    if ! flatpak list --runtime | grep -qF "$name"; then
+    # Match the exact branch: a bare name grep would match a different runtime
+    # version (e.g. 25.08) and silently skip installing the one we need.
+    if ! flatpak info "$ref" &>/dev/null; then
         warn "${ref} not found — installing from flathub..."
         flatpak install -y --noninteractive flathub "${ref}" || {
             error "Failed to install ${ref}. Make sure flathub is enabled:"
@@ -138,10 +147,24 @@ install_runtime_if_missing "org.freedesktop.Platform//${RUNTIME_VERSION}"
 install_runtime_if_missing "org.freedesktop.Sdk//${RUNTIME_VERSION}"
 install_runtime_if_missing "org.electronjs.Electron2.BaseApp//${RUNTIME_VERSION}"
 
-# ── 3. Download Windows installer ────────────────────────────────────────────
-section "⬇️  Fetching Claude Desktop v${CLAUDE_VERSION}..."
+# ── 3. Download Electron + Windows installer ─────────────────────────────────
+section "⬇️  Fetching Electron ${ELECTRON_VERSION}..."
 
 cd "$SCRIPT_DIR"
+
+ELECTRON_FILE="${SCRIPT_DIR}/electron-v${ELECTRON_VERSION}-linux-x64.zip"
+ELECTRON_URL="https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/$(basename "$ELECTRON_FILE")"
+if [ -f "$ELECTRON_FILE" ]; then
+    info "$(basename "$ELECTRON_FILE") already downloaded — skipping."
+else
+    if command -v wget &>/dev/null; then
+        wget -q --show-progress -O "$ELECTRON_FILE" "$ELECTRON_URL"
+    else
+        curl -L --progress-bar -o "$ELECTRON_FILE" "$ELECTRON_URL"
+    fi
+fi
+
+section "⬇️  Fetching Claude Desktop v${CLAUDE_VERSION}..."
 
 if [ -f "$EXE_FILE" ]; then
     info "${EXE_FILE} already downloaded — skipping."
@@ -245,21 +268,43 @@ section "📁 Staging files for flatpak-builder..."
 rm -rf "$STAGING_DIR"
 mkdir -p "$ELECTRON_APP_DIR"
 
+# The runtime's BaseApp supplies zypak and Electron's dependencies, but not
+# Electron itself — it has to be bundled.
+info "Extracting Electron ${ELECTRON_VERSION}..."
+unzip -q "$ELECTRON_FILE" -d "$ELECTRON_APP_DIR"
+
+# Electron derives app.isPackaged from basename(process.execPath): a binary
+# still named "electron" reports isPackaged=false, and Claude then looks for its
+# locale files inside app.asar instead of in resources/ and dies with ENOENT.
+info "Renaming electron binary (makes app.isPackaged true)..."
+mv "${ELECTRON_APP_DIR}/electron" "${ELECTRON_APP_DIR}/claude-desktop"
+
+# app.asar must sit at resources/app.asar next to the binary — that is where
+# Electron looks for it, and it makes process.resourcesPath point at resources/.
+mkdir -p "${ELECTRON_APP_DIR}/resources"
+
 info "Copying patched app.asar..."
-cp "$PATCHED_ASAR" "${ELECTRON_APP_DIR}/app.asar"
+cp "$PATCHED_ASAR" "${ELECTRON_APP_DIR}/resources/app.asar"
 
 # Copy app.asar.unpacked if produced (contains any unpacked .node files)
 UNPACKED_DIR="${WORK_DIR}/app_patched.asar.unpacked"
 if [ -d "$UNPACKED_DIR" ]; then
     info "Copying app.asar.unpacked/..."
-    cp -r "$UNPACKED_DIR" "${ELECTRON_APP_DIR}/app.asar.unpacked"
+    cp -r "$UNPACKED_DIR" "${ELECTRON_APP_DIR}/resources/app.asar.unpacked"
 fi
 
-# Copy resources/ alongside app.asar if present
-if [ -d "${APP_ASAR_DIR}/resources" ]; then
-    info "Copying resources/..."
-    cp -r "${APP_ASAR_DIR}/resources" "$ELECTRON_APP_DIR/"
+# APP_ASAR_DIR *is* the Windows resources/ dir, so its other contents (locale
+# JSONs, fonts, migrations) belong next to app.asar. Windows .exe helpers do not.
+info "Copying bundled resources (locales, fonts, migrations)..."
+find "$APP_ASAR_DIR" -mindepth 1 -maxdepth 1 \
+    ! -name 'app.asar' ! -name 'app.asar.unpacked' ! -name '*.exe' \
+    -exec cp -r {} "${ELECTRON_APP_DIR}/resources/" \;
+
+if [ ! -f "${ELECTRON_APP_DIR}/resources/en-US.json" ]; then
+    error "resources/en-US.json is missing — the app would fail to launch."
+    exit 1
 fi
+info "Locale files staged."
 
 info "Copying icon..."
 cp "$ICON_SRC" "${STAGING_DIR}/claude_6_256x256x32.png"
@@ -271,12 +316,14 @@ section "🔧 Running flatpak-builder..."
 
 cd "$SCRIPT_DIR"
 
-flatpak-builder \
+# Absolute paths: when FB is the org.flatpak.Builder flatpak, the sandbox may
+# not inherit this working directory.
+"${FB[@]}" \
     --force-clean \
     --user \
     --install \
     "$BUILD_DIR" \
-    com.anthropic.Claude.yml
+    "${SCRIPT_DIR}/com.anthropic.Claude.yml"
 
 info "Build complete."
 

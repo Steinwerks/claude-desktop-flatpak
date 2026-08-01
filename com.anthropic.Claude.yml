@@ -43,20 +43,20 @@ modules:
       - mkdir -p /app/share/applications
       - mkdir -p /app/share/icons/hicolor/256x256/apps
       
-      # Copy application files
-      - cp -r app.asar /app/lib/claude-desktop/
-      - cp -r app.asar.unpacked /app/lib/claude-desktop/ || true
-      - cp -r resources /app/lib/claude-desktop/ || true
-      
+      # Copy the staged Electron tree: the renamed binary plus resources/app.asar
+      # and the locale files the app reads from process.resourcesPath.
+      - cp -r electron-app/. /app/lib/claude-desktop/
+
       # Install icons
       - install -Dm644 claude_6_256x256x32.png /app/share/icons/hicolor/256x256/apps/com.anthropic.Claude.png
-      
-      # Create launcher script
+
+      # Create launcher script. No app.asar argument: Electron finds
+      # resources/app.asar next to the binary on its own.
       - |
         cat > /app/bin/claude-desktop << 'EOF'
         #!/bin/sh
         export TMPDIR="$XDG_RUNTIME_DIR/app/$FLATPAK_ID"
-        exec zypak-wrapper /app/electron/electron /app/lib/claude-desktop/app.asar --ozone-platform-hint=auto "$@"
+        exec zypak-wrapper /app/lib/claude-desktop/claude-desktop --ozone-platform-hint=auto "$@"
         EOF
       - chmod +x /app/bin/claude-desktop
       
@@ -67,8 +67,11 @@ modules:
       - install -Dm644 com.anthropic.Claude.metainfo.xml /app/share/metainfo/com.anthropic.Claude.metainfo.xml
     
     sources:
+      # dest keeps the staged tree in its own subdir so the build-commands can
+      # copy it wholesale without sweeping up the icon/desktop/metainfo files.
       - type: dir
         path: ../claude-desktop/build/electron-app
+        dest: electron-app
       - type: file
         path: ../claude-desktop/build/claude_6_256x256x32.png
       - type: file

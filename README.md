@@ -9,33 +9,39 @@ Flatpak is a universal packaging format that works across all Linux distribution
 ## Prerequisites
 
 1. **Flatpak** must be installed on your system
-2. **flatpak-builder** for building the package
+2. **flatpak-builder** — only for `./build.sh`; `./simple-build.sh` does without it
 3. **Flathub** repository should be enabled
+4. **7z**, **node/npx**, and **unzip**, to unpack and patch the Windows installer
 
 ### Installing prerequisites on Fedora:
 ```bash
-sudo dnf install flatpak flatpak-builder
+sudo dnf install flatpak flatpak-builder 7zip nodejs npm unzip
 flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 ```
 
 ### Installing prerequisites on other distros:
-- **Ubuntu/Debian**: `sudo apt install flatpak flatpak-builder`
-- **Arch**: `sudo pacman -S flatpak flatpak-builder`
-- **openSUSE**: `sudo zypper install flatpak flatpak-builder`
+- **Ubuntu/Debian**: `sudo apt install flatpak flatpak-builder p7zip-full nodejs npm unzip`
+- **Arch**: `sudo pacman -S flatpak flatpak-builder p7zip nodejs npm unzip`
+- **openSUSE**: `sudo zypper install flatpak flatpak-builder p7zip nodejs npm unzip`
+
+On immutable systems (Bazzite, Silverblue), see [BAZZITE.md](BAZZITE.md) — none of this
+needs layering or a reboot.
 
 ## Building the Flatpak
 
 You have two options for building:
 
-### Option 1: Using flatpak-builder (Recommended)
+Both produce the same `claude-desktop.flatpak`. Pick whichever suits your system.
 
-First install flatpak-builder:
+### Option 1: Using flatpak-builder
+
+Install flatpak-builder — the Flathub app works everywhere, needs no root, and is the
+easiest route on immutable systems:
+
 ```bash
-# On Bazzite/Fedora (immutable)
-rpm-ostree install flatpak-builder
-# Then reboot
+flatpak install -y flathub org.flatpak.Builder
 
-# Or on regular Fedora
+# Or natively, on a mutable distro
 sudo dnf install flatpak-builder
 ```
 
@@ -45,21 +51,23 @@ cd ~/src/claude-desktop-flatpak
 ./build.sh
 ```
 
+`build.sh` uses a native `flatpak-builder` when present and falls back to
+`flatpak run org.flatpak.Builder` otherwise.
+
 ### Option 2: Simple build (No flatpak-builder needed)
 
-If you don't want to install flatpak-builder or are on an immutable system, use the simple build:
+Uses basic flatpak commands (`build-init`, `build-finish`, `build-export`) instead:
 
 ```bash
 cd ~/src/claude-desktop-flatpak
 ./simple-build.sh
 ```
 
-This uses basic flatpak commands to create the package without requiring flatpak-builder.
-
 Both methods will:
-1. Check and install required Flatpak runtimes
-2. Build the application using flatpak-builder
-3. Create a flatpak bundle file (`claude-desktop.flatpak`)
+1. Check and install the required Flatpak runtimes
+2. Download Electron and the Claude Desktop Windows installer
+3. Patch `app.asar` for Linux and bundle it with Electron
+4. Create a flatpak bundle file (`claude-desktop.flatpak`)
 
 ## Installing the Flatpak
 
