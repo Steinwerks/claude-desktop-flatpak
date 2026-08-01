@@ -257,13 +257,43 @@ cp "${SCRIPT_DIR}/scripts/claude-native-stub.js" "${STUB_DIR}/index.js"
 printf '{"name":"@ant/claude-native","version":"1.0.0","main":"index.js"}' > "${STUB_DIR}/package.json"
 echo "  → Native module stub installed."
 
-# NOTE: do not flip the main window's titleBarStyle from "hidden" to "default"
-# to fix the KDE title bar overlapping the app's nav row. It is created with
-#   {..., titleBarStyle:"hidden", titleBarOverlay:E3t, opacity:0, ...}
-# and titleBarOverlay is only valid alongside titleBarStyle:"hidden". Setting
-# "default" leaves the process running with a taskbar entry but no usable
-# window, and the app stops writing to its own main.log. Any fix for the
-# decoration overlap has to keep titleBarStyle:"hidden" intact.
+# The main window is frameless (titleBarStyle:"hidden") on the assumption that
+# the app draws its own window controls — which it only does on Windows, via
+# titleBarOverlay. On Linux that leaves no title bar at all, and the app's own
+# drag strip (.nc-drag, pinned across the top) sits over the nav icons, so
+# clicking them drags the window instead of activating them.
+#
+# Two changes, and they belong together:
+#   1. Give the window a real native title bar, so it can still be moved and
+#      closed. titleBarOverlay is dropped with it — it is only meaningful
+#      alongside titleBarStyle:"hidden".
+#   2. Make the app's internal drag strip inert, so it stops swallowing clicks.
+#      Dragging moves to the native title bar from (1).
+#
+# The Quick Entry overlay also uses titleBarStyle:"hidden" and must stay
+# frameless, so anchor on the main window's unique minWidth/minHeight.
+echo "  → Patching window decorations for Linux..."
+frame_patches=0
+for f in "${ASAR_CONTENTS}"/.vite/build/*.js; do
+    [ -f "$f" ] || continue
+    if grep -q 'minWidth:600,minHeight:400,titleBarStyle:"hidden"' "$f"; then
+        sed -i 's/minWidth:600,minHeight:400,titleBarStyle:"hidden",titleBarOverlay:[A-Za-z0-9_$]*/minWidth:600,minHeight:400,titleBarStyle:"default",titleBarOverlay:void 0/' "$f"
+        frame_patches=$((frame_patches + 1))
+    fi
+done
+
+if [ "$frame_patches" -eq 0 ]; then
+    echo "❌ Could not find the main window's titleBarStyle — the app layout changed."
+    exit 1
+fi
+
+DRAG_CSS="${ASAR_CONTENTS}/.vite/renderer/main_window/window-shared.css"
+if ! grep -q -- '-webkit-app-region: drag' "$DRAG_CSS" 2>/dev/null; then
+    echo "❌ Could not find the main window drag region CSS — the app layout changed."
+    exit 1
+fi
+sed -i 's/-webkit-app-region: drag/-webkit-app-region: no-drag/g' "$DRAG_CSS"
+echo "  → Window decorations patched (native frame + drag strip disabled)."
 
 echo "  → Repacking app.asar..."
 npx --yes @electron/asar pack "$ASAR_CONTENTS" "$PATCHED_ASAR" --unpack '**/*.node'
