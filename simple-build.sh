@@ -13,16 +13,59 @@ RUNTIME_VERSION="24.08"
 ELECTRON_VERSION="32.2.0"
 
 # Update these when Anthropic releases a new version.
-# Find the current installer URL at: https://downloads.claude.ai/releases/win32/x64/latest/
-CLAUDE_VERSION="1.3109.0"
-EXE_HASH="35cbf6530e05912137624cde0f075dc7f121fa60"
-EXE_FILE="Claude-${EXE_HASH}.exe"
-EXE_URL="https://downloads.claude.ai/releases/win32/x64/${CLAUDE_VERSION}/${EXE_FILE}"
-EXE_SHA256="616a7a1c6235709650b0dabe3a06d32f9ade08340891713bd647dff47065f230"
+# Check what's current with:  ./simple-build.sh --check-version
+#
+# Pinned to 1.3109.0 deliberately. 1.24012.9 does not start under this flatpak:
+# Chromium and Wayland init fine, then the app dies before its own bootstrap —
+# it never writes a byte to its userData dir (no main.log, no config touch) and
+# raises no exception on stdout. Symptom is a tray icon that flashes a window
+# and retreats. Verify any newer version actually launches before bumping this.
+# Both can be overridden from the environment to test another release without
+# editing this file, e.g.
+#   CLAUDE_VERSION=1.3109.0 NUPKG_SHA256=<sha> ./simple-build.sh
+CLAUDE_VERSION="${CLAUDE_VERSION:-1.3109.0}"
+NUPKG_SHA256="${NUPKG_SHA256:-1f0fcb6ff5831ad158f1801f67a771a94ecbaf65c61a2b68538866088660cd7a}"
+
+# Squirrel.Windows release feed. RELEASES lists the current package as
+# "<SHA-1> AnthropicClaude-<version>-full.nupkg <bytes>". The .nupkg is the
+# payload — it can be fetched directly, so there is no need for the NSIS .exe
+# (whose Claude-<sha1>.exe filename is not derivable from any manifest).
+RELEASES_URL="https://downloads.claude.ai/releases/win32/x64/RELEASES"
+NUPKG_FILE="AnthropicClaude-${CLAUDE_VERSION}-full.nupkg"
+NUPKG_URL="https://downloads.claude.ai/releases/win32/x64/${NUPKG_FILE}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="${SCRIPT_DIR}/_deb_extract"
 BUILD_DIR="simple-build"
+
+# Latest version advertised by the release feed (RELEASES carries a UTF-8 BOM).
+resolve_latest_version() {
+    curl -fsSL "$RELEASES_URL" \
+        | sed 's/^\xef\xbb\xbf//' \
+        | awk '{print $2}' \
+        | sed -n 's/^AnthropicClaude-\(.*\)-full\.nupkg$/\1/p' \
+        | tail -1
+}
+
+if [ "${1:-}" = "--check-version" ]; then
+    latest="$(resolve_latest_version)"
+    echo "  pinned:  ${CLAUDE_VERSION}"
+    if [ -z "$latest" ]; then
+        echo "  current: could not read ${RELEASES_URL}"
+        exit 1
+    fi
+    echo "  current: ${latest}"
+    if [ "$latest" = "$CLAUDE_VERSION" ]; then
+        echo "  ✓ up to date."
+    else
+        echo ""
+        echo "  A newer version is available. To update, set in this script:"
+        echo "    CLAUDE_VERSION=\"${latest}\""
+        echo "  then get the checksum for the new pin with:"
+        echo "    curl -fsSL https://downloads.claude.ai/releases/win32/x64/AnthropicClaude-${latest}-full.nupkg | sha256sum"
+    fi
+    exit 0
+fi
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 cleanup() {
@@ -122,50 +165,43 @@ else
     echo "✓ Electron ${ELECTRON_VERSION} already downloaded."
 fi
 
-# ── Download Claude Desktop Windows installer ─────────────────────────────────
+# ── Download Claude Desktop package ──────────────────────────────────────────
 cd "$SCRIPT_DIR"
-if [ ! -f "$EXE_FILE" ]; then
+if [ ! -f "$NUPKG_FILE" ]; then
     echo ""
     echo "⬇️  Downloading Claude Desktop v${CLAUDE_VERSION}..."
     if command -v wget &>/dev/null; then
-        wget -q --show-progress -O "$EXE_FILE" "$EXE_URL"
+        wget -q --show-progress -O "$NUPKG_FILE" "$NUPKG_URL" || {
+            echo "❌ Download failed. Check the current version with: $0 --check-version"
+            rm -f "$NUPKG_FILE"
+            exit 1
+        }
     else
-        curl -L --progress-bar -o "$EXE_FILE" "$EXE_URL"
+        curl -fL --progress-bar -o "$NUPKG_FILE" "$NUPKG_URL" || {
+            echo "❌ Download failed. Check the current version with: $0 --check-version"
+            rm -f "$NUPKG_FILE"
+            exit 1
+        }
     fi
 else
-    echo "✓ ${EXE_FILE} already downloaded."
+    echo "✓ ${NUPKG_FILE} already downloaded."
 fi
 
 echo "  Verifying checksum..."
-echo "${EXE_SHA256}  ${EXE_FILE}" | sha256sum -c --quiet || {
+echo "${NUPKG_SHA256}  ${NUPKG_FILE}" | sha256sum -c --quiet || {
     echo "❌ SHA-256 mismatch — the download may be corrupt or the constants need updating."
-    rm -f "$EXE_FILE"
+    rm -f "$NUPKG_FILE"
     exit 1
 }
 echo "  ✓ Checksum OK."
 
-# ── Extract installer → nupkg → app.asar ─────────────────────────────────────
+# ── Extract nupkg → app.asar ─────────────────────────────────────────────────
 echo ""
-echo "📂 Extracting Claude Desktop installer..."
+echo "📂 Extracting Claude Desktop package..."
 
 rm -rf "$WORK_DIR"
-mkdir -p "${WORK_DIR}/exe"
-cp "$EXE_FILE" "${WORK_DIR}/"
-cd "${WORK_DIR}/exe"
-
-echo "  → Extracting NSIS installer with 7z..."
-7z x -y "${WORK_DIR}/${EXE_FILE}" > /dev/null
-
-NUPKG=$(find . -maxdepth 2 -name "AnthropicClaude-*.nupkg" | head -1)
-if [ -z "$NUPKG" ]; then
-    echo "❌ Could not find AnthropicClaude-*.nupkg inside the installer."
-    exit 1
-fi
-echo "  → Found nupkg: $(basename "$NUPKG")"
-
 mkdir -p "${WORK_DIR}/nupkg"
-echo "  → Extracting nupkg..."
-7z x -y "$NUPKG" -o"${WORK_DIR}/nupkg" > /dev/null
+7z x -y "$NUPKG_FILE" -o"${WORK_DIR}/nupkg" > /dev/null
 
 APP_ASAR=$(find "${WORK_DIR}/nupkg" -name "app.asar" | grep -v "unpacked" | head -1)
 if [ -z "$APP_ASAR" ]; then
@@ -174,13 +210,34 @@ if [ -z "$APP_ASAR" ]; then
 fi
 echo "  → Found app.asar."
 
-ICON_SRC=$(find "${WORK_DIR}/nupkg" -name "*.png" | grep -i "256\|icon\|claude" | head -1)
-[ -z "$ICON_SRC" ] && ICON_SRC=$(find "${WORK_DIR}/nupkg" -name "*.png" | head -1)
+# The only real app icon (256x256) is the one embedded in claude.exe. Every PNG
+# shipped loose in the package is a 24-72px tray glyph, so a naive *.png search
+# yields a monochrome tray icon scaled up into the app menu.
+ICON_SIZE=256
+ICON_SRC=""
+CLAUDE_EXE=$(find "${WORK_DIR}/nupkg" -iname "claude.exe" | head -1)
+if [ -n "$CLAUDE_EXE" ] && command -v wrestool &>/dev/null && command -v icotool &>/dev/null; then
+    if wrestool -x -t 14 "$CLAUDE_EXE" > "${WORK_DIR}/app.ico" 2>/dev/null; then
+        IDX=$(icotool -l "${WORK_DIR}/app.ico" 2>/dev/null \
+              | grep -- "--width=256" | grep -o -- "--index=[0-9]*" | head -1 | cut -d= -f2)
+        if [ -n "$IDX" ] && icotool -x -i "$IDX" -o "${WORK_DIR}/icon-256.png" "${WORK_DIR}/app.ico" 2>/dev/null; then
+            ICON_SRC="${WORK_DIR}/icon-256.png"
+            echo "  → Extracted 256x256 icon from claude.exe."
+        fi
+    fi
+fi
+
 if [ -z "$ICON_SRC" ]; then
-    echo "❌ Could not find an icon in the extracted installer."
+    # icoutils missing, or the layout changed: fall back to the Linux tray icon,
+    # installed at its real size so the desktop does not upscale it.
+    ICON_SRC=$(find "${WORK_DIR}/nupkg" -name "TrayIconLinux.png" | head -1)
+    ICON_SIZE=64
+    echo "  ! Using the 64x64 tray icon (install 'icoutils' for the full-size app icon)."
+fi
+if [ -z "$ICON_SRC" ]; then
+    echo "❌ Could not find an icon in the package."
     exit 1
 fi
-echo "  → Found icon: $(basename "$ICON_SRC")"
 
 cd "$SCRIPT_DIR"
 
@@ -199,6 +256,14 @@ mkdir -p "$STUB_DIR"
 cp "${SCRIPT_DIR}/scripts/claude-native-stub.js" "${STUB_DIR}/index.js"
 printf '{"name":"@ant/claude-native","version":"1.0.0","main":"index.js"}' > "${STUB_DIR}/package.json"
 echo "  → Native module stub installed."
+
+# NOTE: do not flip the main window's titleBarStyle from "hidden" to "default"
+# to fix the KDE title bar overlapping the app's nav row. It is created with
+#   {..., titleBarStyle:"hidden", titleBarOverlay:E3t, opacity:0, ...}
+# and titleBarOverlay is only valid alongside titleBarStyle:"hidden". Setting
+# "default" leaves the process running with a taskbar entry but no usable
+# window, and the app stops writing to its own main.log. Any fix for the
+# decoration overlap has to keep titleBarStyle:"hidden" intact.
 
 echo "  → Repacking app.asar..."
 npx --yes @electron/asar pack "$ASAR_CONTENTS" "$PATCHED_ASAR" --unpack '**/*.node'
@@ -224,7 +289,7 @@ echo "📁 Setting up application files..."
 mkdir -p "$BUILD_DIR/files/lib/claude-desktop/resources"
 mkdir -p "$BUILD_DIR/files/bin"
 mkdir -p "$BUILD_DIR/files/share/applications"
-mkdir -p "$BUILD_DIR/files/share/icons/hicolor/256x256/apps"
+mkdir -p "$BUILD_DIR/files/share/icons/hicolor/${ICON_SIZE}x${ICON_SIZE}/apps"
 mkdir -p "$BUILD_DIR/files/share/metainfo"
 
 echo "  → Extracting Electron..."
@@ -262,7 +327,7 @@ if [ ! -f "$BUILD_DIR/files/lib/claude-desktop/resources/en-US.json" ]; then
 fi
 
 echo "  → Copying icon..."
-cp "$ICON_SRC" "$BUILD_DIR/files/share/icons/hicolor/256x256/apps/${APP_ID}.png"
+cp "$ICON_SRC" "$BUILD_DIR/files/share/icons/hicolor/${ICON_SIZE}x${ICON_SIZE}/apps/${APP_ID}.png"
 
 echo "  → Creating launcher..."
 # No app.asar argument needed: it already sits at the default resources/app.asar

@@ -9,6 +9,8 @@ _deb_extract/
 electron-*.zip
 electron-*.tar.xz
 *.deb
+*.exe
+*.nupkg
 
 # Flatpak builder cache
 .flatpak-builder/
